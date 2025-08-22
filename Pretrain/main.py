@@ -30,7 +30,7 @@ def main():
         return img
 
     def train(args, global_step, train_loader, val_best, scaler):
-
+        device_type = "cuda" if torch.cuda.is_available() and "cuda" in str(args.device) else "cpu"
         model.train()
         loss_train = []
         loss_train_recon = []
@@ -44,7 +44,7 @@ def main():
             x2_augment = aug_rand(args, x2)
             x1_augment = x1_augment
             x2_augment = x2_augment
-            with torch.cuda.amp.autocast(enabled=args.amp):
+            with torch.amp.autocast(device_type=device_type, enabled=args.amp):
                 rot1_p, contrastive1_p, rec_x1 = model(x1_augment)
                 rot2_p, contrastive2_p, rec_x2 = model(x2_augment)
                 rot_p = torch.cat([rot1_p, rot2_p], dim=0)
@@ -101,7 +101,7 @@ def main():
         return global_step, loss, val_best
 
     def validation(args, test_loader):
-        device_type = "cuda" if "cuda" in str(args.device) else "cpu"
+        device_type = "cuda" if torch.cuda.is_available() and "cuda" in str(args.device) else "cpu"
         model.eval()
         loss_val = []
         loss_val_recon = []
