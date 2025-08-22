@@ -21,7 +21,7 @@ def generate_ssl_json(args):
     #   args.json -> output json path
     set_seed(42)
 
-    dental_dir = os.path.join(args.path, "DENTAL")
+    dental_dir = args.path
     dental_files = load_files_in_directory(dental_dir)
     if not dental_files:
       raise ValueError(f"No images found in {dental_dir}")
@@ -53,14 +53,15 @@ if __name__ == "__main__":
         "--json", default="jsons/dataset0.json", type=str, help="Path to the JSON output"
     )
     parser.add_argument(
-        "--mode", type=str, help="Specify the data generation mode (ssl or sl)"
-    )
-    parser.add_argument(
         "--ratio", default=0.1, type=float, help="Ratio of validation data"
     )
     parser.add_argument(
         "--folds", default=1, type=int, help="Number of folds"
     )
     args = parser.parse_args()
+
+    args.path = "../DENTAL"
+    args.json = "jsons"
+    args.folds = 1
 
     generate_ssl_json(args)
