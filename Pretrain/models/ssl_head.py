@@ -41,7 +41,7 @@ class SSLHead(nn.Module):
 
         # Feature dim of last stage = embed_dim * 2**(num_stages-1)
         num_stages = 4
-        dim = args.feature_size * (2 ** (num_stages - 1))  # e.g., 48 -> 384
+        dim = args.feature_size * 16  # e.g., 48 -> 768
 
         # Heads
         self.rotation_pre = nn.Identity()
