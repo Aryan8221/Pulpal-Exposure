@@ -29,6 +29,22 @@ def main():
         img = (img * 255.0).astype(np.uint8)
         return img
 
+    def to_uint8_img(arr_t):
+        # arr_t: torch.Tensor (B,C,H,W) or (B,C,H,W,D)
+        t = arr_t.detach().to(torch.float32)  # <— important: drop bf16
+        t = (t - t.amin()) / (t.amax() - t.amin() + 1e-8)
+        t = (t * 255.0).clamp_(0, 255).to(torch.uint8)
+        return t
+
+    def pick_slice_for_vis(t):  # t: uint8 tensor
+        if t.ndim == 5:  # (B,C,H,W,D)
+            z = t.shape[-1] // 2
+            return t[0, 0, :, :, z].cpu().numpy()
+        elif t.ndim == 4:  # (B,C,H,W)
+            return t[0, 0, :, :].cpu().numpy()
+        else:
+            raise ValueError(f"Unexpected shape {t.shape}")
+
     def train(args, global_step, train_loader, val_best, scaler):
         device_type = "cuda" if torch.cuda.is_available() and "cuda" in str(args.device) else "cpu"
         model.train()
@@ -123,18 +139,38 @@ def main():
                 loss_recon = losses_tasks[2]
                 loss_val.append(loss.item())
                 loss_val_recon.append(loss_recon.item())
-                x_gt = x1.detach().cpu().numpy()
-                x_gt = (x_gt - np.min(x_gt)) / (np.max(x_gt) - np.min(x_gt))
-                xgt = pick_slice_for_vis(x_gt)
+
+                # x_gt = x1.detach().cpu().numpy()
+                # x_gt = (x_gt - np.min(x_gt)) / (np.max(x_gt) - np.min(x_gt))
+                xgt_t = to_uint8_img(x1)
+                xgt_t = (xgt_t - np.min(xgt_t)) / (np.max(xgt_t) - np.min(xgt_t))
+
+                # xgt = pick_slice_for_vis(x_gt)
+                xgt = pick_slice_for_vis(xgt_t)
+
                 xgt = xgt.astype(np.uint8)
-                x1_augment = x1_augment.detach().cpu().numpy()
-                x1_augment = (x1_augment - np.min(x1_augment)) / (np.max(x1_augment) - np.min(x1_augment))
-                x_aug = pick_slice_for_vis(x1_augment)
+                # ----------
+                # x1_augment = x1_augment.detach().cpu().numpy()
+                # x1_augment = (x1_augment - np.min(x1_augment)) / (np.max(x1_augment) - np.min(x1_augment))
+                xaug_t = to_uint8_img(x1_augment)
+                xaug_t = (xaug_t - np.min(xaug_t)) / (np.max(xaug_t) - np.min(xaug_t))
+
+                # x_aug = pick_slice_for_vis(x1_augment)
+                x_aug = pick_slice_for_vis(xaug_t)
+
                 x_aug = x_aug.astype(np.uint8)
-                rec_x1 = rec_x1.detach().cpu().numpy()
-                rec_x1 = (rec_x1 - np.min(rec_x1)) / (np.max(rec_x1) - np.min(rec_x1))
-                recon = pick_slice_for_vis(rec_x1)
+                # ----------
+
+                # rec_x1 = rec_x1.detach().cpu().numpy()
+                # rec_x1 = (rec_x1 - np.min(rec_x1)) / (np.max(rec_x1) - np.min(rec_x1))
+                recon_t = to_uint8_img(rec_x1)
+                recon_t = (recon_t - np.min(recon_t)) / (np.max(recon_t) - np.min(recon_t))
+
+                # recon = pick_slice_for_vis(rec_x1)
+                recon = pick_slice_for_vis(recon_t)
+
                 recon = recon.astype(np.uint8)
+                # ----------
                 img_list = [xgt, x_aug, recon]
                 logger.info("Validation step:{}, Loss:{:.4f}, Loss Reconstruction:{:.4f}".format(step, loss.item(),
                                                                                                  loss_recon.item()))
