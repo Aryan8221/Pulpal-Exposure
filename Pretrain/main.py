@@ -269,6 +269,12 @@ def main():
     loss_function = Loss(args.batch_size * args.sw_batch_size, args)
     train_loader, test_loader = get_loader(args)
 
+    print('-'*50)
+    for batch in train_loader:
+        print(batch.keys())  # usually 'image', maybe 'label'
+        print(batch["image"].shape)
+        break
+    print('-'*50)
 
     global_step = 0
     best_val = 1e8
