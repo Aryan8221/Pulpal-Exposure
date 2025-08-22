@@ -18,6 +18,17 @@ def main():
     def save_ckp(state, checkpoint_dir):
         torch.save(state, checkpoint_dir)
 
+    def pick_slice_for_vis(arr):  # arr: numpy array after min-max to [0,1]
+        if arr.ndim == 5:  # (B, C, H, W, D)
+            z = arr.shape[-1] // 2
+            img = arr[0, 0, :, :, z]
+        elif arr.ndim == 4:  # (B, C, H, W)
+            img = arr[0, 0, :, :]
+        else:
+            raise ValueError(f"Unexpected ndim for preview: {arr.shape}")
+        img = (img * 255.0).astype(np.uint8)
+        return img
+
     def train(args, global_step, train_loader, val_best, scaler):
 
         model.train()
@@ -113,15 +124,15 @@ def main():
                 loss_val_recon.append(loss_recon.item())
                 x_gt = x1.detach().cpu().numpy()
                 x_gt = (x_gt - np.min(x_gt)) / (np.max(x_gt) - np.min(x_gt))
-                xgt = x_gt[0][0][:, :, 48] * 255.0
+                xgt = pick_slice_for_vis(x_gt)
                 xgt = xgt.astype(np.uint8)
                 x1_augment = x1_augment.detach().cpu().numpy()
                 x1_augment = (x1_augment - np.min(x1_augment)) / (np.max(x1_augment) - np.min(x1_augment))
-                x_aug = x1_augment[0][0][:, :, 48] * 255.0
+                x_aug = pick_slice_for_vis(x1_augment)
                 x_aug = x_aug.astype(np.uint8)
                 rec_x1 = rec_x1.detach().cpu().numpy()
                 rec_x1 = (rec_x1 - np.min(rec_x1)) / (np.max(rec_x1) - np.min(rec_x1))
-                recon = rec_x1[0][0][:, :, 48] * 255.0
+                recon = pick_slice_for_vis(rec_x1)
                 recon = recon.astype(np.uint8)
                 img_list = [xgt, x_aug, recon]
                 logger.info("Validation step:{}, Loss:{:.4f}, Loss Reconstruction:{:.4f}".format(step, loss.item(),
@@ -258,10 +269,11 @@ def main():
     loss_function = Loss(args.batch_size * args.sw_batch_size, args)
     train_loader, test_loader = get_loader(args)
 
+
     global_step = 0
     best_val = 1e8
     if args.amp:
-        scaler = torch.cuda.amp.GradScaler()
+        scaler = torch.amp.GradScaler('cuda')
     else:
         scaler = None
     while global_step < args.num_steps:

@@ -30,7 +30,7 @@ from monai.transforms import (
 
 
 def get_loader(args):
-    num_workers = 4
+    num_workers = 2
 
     train_list = load_decathlon_datalist(
         args.json_list, False, "training", base_dir=args.data_dir
@@ -48,19 +48,19 @@ def get_loader(args):
     transforms_list = [
         LoadImaged(keys=["image"],image_only=True),
         EnsureChannelFirstd(keys=["image"]),
-        Orientationd(keys=["image"], axcodes="RAS"),
+        # Orientationd(keys=["image"], axcodes="RAS"),
         SpatialPadd(
             keys="image",
-            spatial_size=[args.roi_x, args.roi_y, args.roi_z],
+            spatial_size=[args.roi_x, args.roi_y],
         ),
         CropForegroundd(
             keys=["image"],
             source_key="image",
-            k_divisible=[args.roi_x, args.roi_y, args.roi_z],
+            k_divisible=[args.roi_x, args.roi_y],
         ),
         RandSpatialCropSamplesd(
             keys=["image"],
-            roi_size=[args.roi_x, args.roi_y, args.roi_z],
+            roi_size=[args.roi_x, args.roi_y],
             num_samples=args.sw_batch_size,
             random_center=True,
             random_size=False,
