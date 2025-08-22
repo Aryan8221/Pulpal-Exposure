@@ -11,16 +11,17 @@
 
 import torch
 import torch.nn as nn
-
 from monai.networks.nets.swin_unetr import SwinTransformer as SwinViT
 from monai.utils import ensure_tuple_rep
 
-
 class SSLHead(nn.Module):
-    def __init__(self, args, upsample="vae", dim=768):
-        super(SSLHead, self).__init__()
-        patch_size = ensure_tuple_rep(2, args.spatial_dims)
-        window_size = ensure_tuple_rep(7, args.spatial_dims)
+    def __init__(self, args, upsample="vae"):
+        super().__init__()
+        self.spatial_dims = args.spatial_dims  # 2 or 3
+
+        # Backbone
+        patch_size  = ensure_tuple_rep(2, self.spatial_dims)
+        window_size = ensure_tuple_rep(7, self.spatial_dims)
         self.swinViT = SwinViT(
             in_chans=args.in_channels,
             embed_dim=args.feature_size,
@@ -33,61 +34,88 @@ class SSLHead(nn.Module):
             drop_rate=0.0,
             attn_drop_rate=0.0,
             drop_path_rate=args.dropout_path_rate,
-            norm_layer=torch.nn.LayerNorm,
+            norm_layer=nn.LayerNorm,
             use_checkpoint=args.use_checkpoint,
-            spatial_dims=args.spatial_dims,
+            spatial_dims=self.spatial_dims,
         )
+
+        # Feature dim of last stage = embed_dim * 2**(num_stages-1)
+        num_stages = 4
+        dim = args.feature_size * (2 ** (num_stages - 1))  # e.g., 48 -> 384
+
+        # Heads
         self.rotation_pre = nn.Identity()
         self.rotation_head = nn.Linear(dim, 4)
         self.contrastive_pre = nn.Identity()
         self.contrastive_head = nn.Linear(dim, 512)
+
+        # Decoder / reconstruction head (2D or 3D)
         if upsample == "large_kernel_deconv":
-            self.conv = nn.ConvTranspose3d(dim, args.in_channels, kernel_size=(32, 32, 32), stride=(32, 32, 32))
+            self.conv = nn.ConvTranspose3d(dim, args.in_channels, (32, 32, 32), (32, 32, 32)) \
+                if self.spatial_dims == 3 else \
+                nn.ConvTranspose2d(dim, args.in_channels, (32, 32), (32, 32))
+
         elif upsample == "deconv":
-            self.conv = nn.Sequential(
-                nn.ConvTranspose3d(dim, dim // 2, kernel_size=(2, 2, 2), stride=(2, 2, 2)),
-                nn.ConvTranspose3d(dim // 2, dim // 4, kernel_size=(2, 2, 2), stride=(2, 2, 2)),
-                nn.ConvTranspose3d(dim // 4, dim // 8, kernel_size=(2, 2, 2), stride=(2, 2, 2)),
-                nn.ConvTranspose3d(dim // 8, dim // 16, kernel_size=(2, 2, 2), stride=(2, 2, 2)),
-                nn.ConvTranspose3d(dim // 16, args.in_channels, kernel_size=(2, 2, 2), stride=(2, 2, 2)),
-            )
+            if self.spatial_dims == 3:
+                self.conv = nn.Sequential(
+                    nn.ConvTranspose3d(dim,       dim // 2, (2, 2, 2), (2, 2, 2)),
+                    nn.ConvTranspose3d(dim // 2,  dim // 4, (2, 2, 2), (2, 2, 2)),
+                    nn.ConvTranspose3d(dim // 4,  dim // 8, (2, 2, 2), (2, 2, 2)),
+                    nn.ConvTranspose3d(dim // 8,  dim // 16,(2, 2, 2), (2, 2, 2)),
+                    nn.ConvTranspose3d(dim // 16, args.in_channels, (2, 2, 2), (2, 2, 2)),
+                )
+            else:
+                self.conv = nn.Sequential(
+                    nn.ConvTranspose2d(dim,       dim // 2, 2, 2),
+                    nn.ConvTranspose2d(dim // 2,  dim // 4, 2, 2),
+                    nn.ConvTranspose2d(dim // 4,  dim // 8, 2, 2),
+                    nn.ConvTranspose2d(dim // 8,  dim // 16,2, 2),
+                    nn.ConvTranspose2d(dim // 16, args.in_channels, 2, 2),
+                )
+
         elif upsample == "vae":
-            self.conv = nn.Sequential(
-                nn.Conv3d(dim, dim // 2, kernel_size=3, stride=1, padding=1),
-                nn.InstanceNorm3d(dim // 2),
-                nn.LeakyReLU(),
-                nn.Upsample(scale_factor=2, mode="trilinear", align_corners=False),
-                nn.Conv3d(dim // 2, dim // 4, kernel_size=3, stride=1, padding=1),
-                nn.InstanceNorm3d(dim // 4),
-                nn.LeakyReLU(),
-                nn.Upsample(scale_factor=2, mode="trilinear", align_corners=False),
-                nn.Conv3d(dim // 4, dim // 8, kernel_size=3, stride=1, padding=1),
-                nn.InstanceNorm3d(dim // 8),
-                nn.LeakyReLU(),
-                nn.Upsample(scale_factor=2, mode="trilinear", align_corners=False),
-                nn.Conv3d(dim // 8, dim // 16, kernel_size=3, stride=1, padding=1),
-                nn.InstanceNorm3d(dim // 16),
-                nn.LeakyReLU(),
-                nn.Upsample(scale_factor=2, mode="trilinear", align_corners=False),
-                nn.Conv3d(dim // 16, dim // 16, kernel_size=3, stride=1, padding=1),
-                nn.InstanceNorm3d(dim // 16),
-                nn.LeakyReLU(),
-                nn.Upsample(scale_factor=2, mode="trilinear", align_corners=False),
-                nn.Conv3d(dim // 16, args.in_channels, kernel_size=1, stride=1),
-            )
+            if self.spatial_dims == 3:
+                self.conv = nn.Sequential(
+                    nn.Conv3d(dim, dim // 2, 3, padding=1), nn.InstanceNorm3d(dim // 2), nn.LeakyReLU(inplace=True),
+                    nn.Upsample(scale_factor=2, mode="trilinear", align_corners=False),
+                    nn.Conv3d(dim // 2, dim // 4, 3, padding=1), nn.InstanceNorm3d(dim // 4), nn.LeakyReLU(inplace=True),
+                    nn.Upsample(scale_factor=2, mode="trilinear", align_corners=False),
+                    nn.Conv3d(dim // 4, dim // 8, 3, padding=1), nn.InstanceNorm3d(dim // 8), nn.LeakyReLU(inplace=True),
+                    nn.Upsample(scale_factor=2, mode="trilinear", align_corners=False),
+                    nn.Conv3d(dim // 8, dim // 16,3, padding=1), nn.InstanceNorm3d(dim // 16), nn.LeakyReLU(inplace=True),
+                    nn.Upsample(scale_factor=2, mode="trilinear", align_corners=False),
+                    nn.Conv3d(dim // 16, dim // 16,3, padding=1), nn.InstanceNorm3d(dim // 16), nn.LeakyReLU(inplace=True),
+                    nn.Upsample(scale_factor=2, mode="trilinear", align_corners=False),
+                    nn.Conv3d(dim // 16, args.in_channels, 1),
+                )
+            else:
+                self.conv = nn.Sequential(
+                    nn.Conv2d(dim, dim // 2, 3, padding=1), nn.InstanceNorm2d(dim // 2), nn.LeakyReLU(inplace=True),
+                    nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+                    nn.Conv2d(dim // 2, dim // 4, 3, padding=1), nn.InstanceNorm2d(dim // 4), nn.LeakyReLU(inplace=True),
+                    nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+                    nn.Conv2d(dim // 4, dim // 8, 3, padding=1), nn.InstanceNorm2d(dim // 8), nn.LeakyReLU(inplace=True),
+                    nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+                    nn.Conv2d(dim // 8, dim // 16,3, padding=1), nn.InstanceNorm2d(dim // 16), nn.LeakyReLU(inplace=True),
+                    nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+                    nn.Conv2d(dim // 16, dim // 16,3, padding=1), nn.InstanceNorm2d(dim // 16), nn.LeakyReLU(inplace=True),
+                    nn.Upsample(scale_factor=2, mode="bilinear", align_corners=False),
+                    nn.Conv2d(dim // 16, args.in_channels, 1),
+                )
+        else:
+            raise ValueError(f"Unknown upsample mode: {upsample}")
 
     def forward(self, x):
+        # x_out is (B, C, H/32, W/32[, D/32]) for last stage
         out = self.swinViT(x.contiguous())
-        x_out = out[4]
-        print(f'x_out shape : {x_out.shape}')
-        _, c, h, w, d = x_out.shape # batch × dim × H/32 × W/32 × D/32
-        x4_reshape = x_out.flatten(start_dim=2, end_dim=4) # batch × dim × (h*w*d) 
-        x4_reshape = x4_reshape.transpose(1, 2) # batch × (h*w*d) × dim
-        x_rot = self.rotation_pre(x4_reshape[:, 0]) # Why slicing?
-        x_rot = self.rotation_head(x_rot)
-        x_contrastive = self.contrastive_pre(x4_reshape[:, 1]) # Again, why slicing?
-        x_contrastive = self.contrastive_head(x_contrastive)
-        x_rec = x_out.flatten(start_dim=2, end_dim=4)
-        x_rec = x_rec.view(-1, c, h, w, d)
-        x_rec = self.conv(x_rec)
+        x_out = out[-1]  # use last stage regardless of list length
+
+        # token features for heads: (B, N, C), works for 2D or 3D
+        tokens = x_out.flatten(2).transpose(1, 2)
+        x_rot = self.rotation_head(self.rotation_pre(tokens[:, 0]))
+        x_contrastive = self.contrastive_head(self.contrastive_pre(tokens[:, 1]))
+
+        # reconstruction from feature map (keep shape, decode per spatial_dims)
+        x_rec = self.conv(x_out)
         return x_rot, x_contrastive, x_rec
+
